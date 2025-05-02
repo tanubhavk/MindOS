@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import Draggable from "react-draggable";
 import { v4 as uuidv4 } from "uuid";
 
@@ -25,6 +25,7 @@ export default function NodeCanvas() {
   const [timePickerPosition, setTimePickerPosition] = useState({ x: 0, y: 0 });
   const [selectedNodeForTime, setSelectedNodeForTime] = useState(null);
   const timePickerRef = useRef(null);
+  const [zoom, setZoom] = useState(1);
 
   // Load saved plans on component mount
   useEffect(() => {
@@ -158,15 +159,65 @@ export default function NodeCanvas() {
     };
   }, [input, time]);
 
-  const handleDrag = (e, data, id) => {
-    requestAnimationFrame(() => {
-      setNodes((prevNodes) =>
-        prevNodes.map((node) =>
-          node.id === id ? { ...node, x: data.x, y: data.y } : node
-        )
-      );
+  // Update the handleDrag function for smoother dragging
+  const handleDrag = useCallback((e, data, id) => {
+    e.stopPropagation(); // Prevent canvas drag events while dragging nodes
+    
+    setNodes(prevNodes => {
+      // Find the dragged node
+      const draggedNodeIndex = prevNodes.findIndex(node => node.id === id);
+      if (draggedNodeIndex === -1) return prevNodes;
+      
+      // Create a new array with the updated node position
+      const newNodes = [...prevNodes];
+      const canvas = canvasRef.current;
+      if (!canvas) return prevNodes;
+      
+      const canvasRect = canvas.getBoundingClientRect();
+      const maxX = canvasRect.width - 80; // Account for node width
+      const maxY = canvasRect.height - 45; // Account for node height
+      
+      newNodes[draggedNodeIndex] = {
+        ...newNodes[draggedNodeIndex],
+        x: Math.max(0, Math.min(data.x, maxX)),
+        y: Math.max(0, Math.min(data.y, maxY))
+      };
+      
+      return newNodes;
     });
-  };
+  }, []);
+
+  // Update the handleDragStart function
+  const handleDragStart = useCallback((e) => {
+    e.stopPropagation();
+    // Disable text selection during drag
+    document.body.style.userSelect = 'none';
+    // Disable pointer events on connections during drag
+    const svg = document.querySelector('.connection-lines');
+    if (svg) svg.style.pointerEvents = 'none';
+    
+    // Add smooth transition class to the node being dragged
+    const node = e.target.closest('.node');
+    if (node) {
+      node.style.transition = 'none';
+    }
+  }, []);
+
+  // Update the handleDragStop function
+  const handleDragStop = useCallback((e) => {
+    e.stopPropagation();
+    // Re-enable text selection
+    document.body.style.userSelect = '';
+    // Re-enable pointer events on connections
+    const svg = document.querySelector('.connection-lines');
+    if (svg) svg.style.pointerEvents = '';
+    
+    // Remove smooth transition class from the node
+    const node = e.target.closest('.node');
+    if (node) {
+      node.style.transition = 'all 0.15s ease-in-out';
+    }
+  }, []);
 
   const handleClickNode = (e, id) => {
     if (e.metaKey || e.ctrlKey) {
@@ -453,7 +504,7 @@ export default function NodeCanvas() {
   };
 
   const handleCanvasMouseMove = (e) => {
-    if (!isDragging) return;
+    if (!isDragging || !canvasRef.current) return;
 
     const rect = canvasRef.current.getBoundingClientRect();
     const scrollLeft = canvasRef.current.scrollLeft || 0;
@@ -498,8 +549,10 @@ export default function NodeCanvas() {
   };
 
   const handleCanvasMouseUp = () => {
-    setIsDragging(false);
-    setSelectionBox(null);
+    if (isDragging) {
+      setIsDragging(false);
+      setSelectionBox(null);
+    }
   };
 
   // Add event listeners for canvas
@@ -525,7 +578,7 @@ export default function NodeCanvas() {
       canvas.removeEventListener('mouseup', handleCanvasMouseUp);
       canvas.removeEventListener('mouseleave', handleMouseLeave);
     };
-  }, [isDragging, dragStart]);
+  }, [isDragging, dragStart, nodes]);
 
   // Generate time options
   const generateTimeOptions = () => {
@@ -579,6 +632,184 @@ export default function NodeCanvas() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Add zoom handler
+  const handleZoom = useCallback((e) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      
+      // Check if the event is from a trackpad by looking at the deltaMode
+      // deltaMode 0 is typically used for precise scrolling devices like trackpads
+      const isTrackpad = e.deltaMode === 0;
+      
+      // Increase zoom factors by 10%
+      const zoomFactor = isTrackpad ? 0.0045 : 0.055;
+      const delta = e.deltaY > 0 ? -zoomFactor : zoomFactor;
+      
+      // Apply zoom change more gradually and ensure it stays within bounds
+      const newZoom = Math.min(Math.max(zoom + delta, 0.1), 3);
+      
+      // Get mouse position relative to canvas
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return; // Guard against null canvas reference
+      
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      
+      setZoom(newZoom);
+    }
+  }, [zoom]);
+
+  // Add keyboard shortcuts for zooming
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === '=') {
+        e.preventDefault();
+        setZoom(prev => Math.min(prev + 0.055, 3));
+      } else if ((e.metaKey || e.ctrlKey) && e.key === '-') {
+        e.preventDefault();
+        setZoom(prev => Math.max(prev - 0.055, 0.1));
+      } else if ((e.metaKey || e.ctrlKey) && e.key === '0') {
+        e.preventDefault();
+        setZoom(1);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, []);
+
+  // Add wheel event listener for zooming
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleWheel = (e) => {
+      handleZoom(e);
+    };
+
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', handleWheel);
+  }, [handleZoom]);
+
+  // Update the canvas style
+  const canvasStyle = {
+    flex: 1,
+    position: "relative",
+    overflow: "auto",
+    padding: "1rem",
+    minWidth: "100%",
+    minHeight: "100%",
+    cursor: isDragging ? "crosshair" : "default",
+    userSelect: "none"
+  };
+
+  // Update the content container style
+  const contentStyle = {
+    position: "relative",
+    transform: `scale(${zoom})`,
+    transformOrigin: "0 0",
+    transition: "transform 0.1s ease-out",
+    width: "fit-content",
+    height: "fit-content",
+    minWidth: "100%",
+    minHeight: "100%"
+  };
+
+  // Update the getNodeStyle function to include smooth transitions
+  const getNodeStyle = (node, isSelected) => ({
+    position: "absolute",
+    width: "auto",
+    minWidth: "80px",
+    maxWidth: "120px",
+    minHeight: "45px",
+    padding: "0.5rem",
+    background: isSelected
+      ? 'rgba(59, 130, 246, 0.15)'
+      : (node.type === 'goal' ? 'rgba(34, 197, 94, 0.08)' :
+         node.type === 'action' ? 'rgba(59, 130, 246, 0.08)' :
+         'rgba(234, 179, 8, 0.08)'),
+    borderRadius: "6px",
+    border: `1.5px solid ${
+      isSelected
+        ? 'rgba(59, 130, 246, 0.5)'
+        : (node.type === 'goal' ? 'rgba(34, 197, 94, 0.2)' :
+           node.type === 'action' ? 'rgba(59, 130, 246, 0.2)' :
+           'rgba(234, 179, 8, 0.2)')
+    }`,
+    cursor: editingNode?.id === node.id ? "default" : "move",
+    fontSize: `${0.6 / zoom}rem`,
+    userSelect: "none",
+    zIndex: isSelected ? 1000 : 2,
+    boxShadow: isSelected
+      ? "0 0 0 2px rgba(59, 130, 246, 0.3)"
+      : "0 1px 2px rgba(0,0,0,0.03)",
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.25rem",
+    transition: "all 0.15s ease-in-out",
+    willChange: "transform",
+    touchAction: "none",
+    transform: `translate3d(0, 0, 0)`, // Force GPU acceleration
+    backfaceVisibility: "hidden", // Prevent flickering
+    perspective: "1000px" // Improve 3D rendering
+  });
+
+  // Update the ZoomControls component
+  const ZoomControls = () => (
+    <div style={{
+      position: "absolute",
+      bottom: "20px",
+      right: "320px",
+      display: "flex",
+      gap: "8px",
+      padding: "8px",
+      background: "white",
+      borderRadius: "8px",
+      boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+      zIndex: 1000
+    }}>
+      <button
+        onClick={() => setZoom(prev => Math.max(prev - 0.055, 0.1))}
+        style={{
+          padding: "4px 8px",
+          background: "white",
+          border: "1px solid #ddd",
+          borderRadius: "4px",
+          cursor: "pointer"
+        }}
+      >
+        -
+      </button>
+      <span style={{ padding: "4px 8px" }}>
+        {Math.round(zoom * 100)}%
+      </span>
+      <button
+        onClick={() => setZoom(prev => Math.min(prev + 0.055, 3))}
+        style={{
+          padding: "4px 8px",
+          background: "white",
+          border: "1px solid #ddd",
+          borderRadius: "4px",
+          cursor: "pointer"
+        }}
+      >
+        +
+      </button>
+      <button
+        onClick={() => setZoom(1)}
+        style={{
+          padding: "4px 8px",
+          background: "white",
+          border: "1px solid #ddd",
+          borderRadius: "4px",
+          cursor: "pointer"
+        }}
+      >
+        Reset
+      </button>
+    </div>
+  );
 
   return (
     <div style={{ display: "flex", height: "100vh" }}>
@@ -673,328 +904,239 @@ export default function NodeCanvas() {
         <div 
           className="canvas" 
           ref={canvasRef} 
-          style={{ 
-            flex: 1, 
-            position: "relative",
-            overflow: "auto",
-            padding: "1rem",
-            minWidth: "100%",
-            minHeight: "100%",
-            cursor: isDragging ? "crosshair" : "default",
-            userSelect: "none" // Prevent text selection while dragging
-          }}
+          style={canvasStyle}
         >
-          {/* Selection Box */}
-          {selectionBox && (
-            <div style={{
-              position: 'absolute',
-              left: selectionBox.left,
-              top: selectionBox.top,
-              width: selectionBox.width,
-              height: selectionBox.height,
-              border: '1.5px solid rgba(59, 130, 246, 0.8)',
-              background: 'rgba(59, 130, 246, 0.1)',
-              pointerEvents: 'none',
-              zIndex: 1000
-            }} />
-          )}
+          <div style={contentStyle}>
+            {/* Connection lines - Moved before nodes to render behind them */}
+            <svg className="connection-lines" style={{ 
+              position: "absolute", 
+              width: "100%", 
+              height: "100%",
+              pointerEvents: "none",
+              zIndex: 1,
+              transform: `translate3d(0, 0, 0)`,
+              willChange: "transform"
+            }}>
+              {connections.map(({ from, to }, index) => {
+                const fromNode = getNodeById(from);
+                const toNode = getNodeById(to);
+                if (!fromNode || !toNode) return null;
 
-          <svg className="connection-lines" style={{ 
-            position: "absolute", 
-            width: "100%", 
-            height: "100%",
-            pointerEvents: "none",
-            zIndex: 1
-          }}>
-            {connections.map(({ from, to }, index) => {
-              const fromNode = getNodeById(from);
-              const toNode = getNodeById(to);
-              if (!fromNode || !toNode) return null;
+                // Calculate node centers
+                const fromCenterX = fromNode.x + 40; // Half of node width (80/2)
+                const fromCenterY = fromNode.y + 22.5; // Half of node height (45/2)
+                const toCenterX = toNode.x + 40;
+                const toCenterY = toNode.y + 22.5;
 
-              const x1 = fromNode.x + 40;
-              const y1 = fromNode.y + 25;
-              const x2 = toNode.x + 40;
-              const y2 = toNode.y + 25;
+                // Calculate direction vector
+                const dx = toCenterX - fromCenterX;
+                const dy = toCenterY - fromCenterY;
+                const len = Math.sqrt(dx * dx + dy * dy);
 
-              const dx = x2 - x1;
-              const dy = y2 - y1;
-              const len = Math.sqrt(dx * dx + dy * dy);
-              const shorten = 20;
+                // Calculate node radius (approximate)
+                const nodeRadius = 35; // Average of width and height
 
-              const sx = x1 + (dx / len) * shorten;
-              const sy = y1 + (dy / len) * shorten;
-              const ex = x2 - (dx / len) * shorten;
-              const ey = y2 - (dy / len) * shorten;
+                // Calculate start and end points
+                const startX = fromCenterX + (dx / len) * nodeRadius;
+                const startY = fromCenterY + (dy / len) * nodeRadius;
+                const endX = toCenterX - (dx / len) * nodeRadius;
+                const endY = toCenterY - (dy / len) * nodeRadius;
 
-              return (
-                <g key={index}>
-                  <line
-                    x1={sx}
-                    y1={sy}
-                    x2={ex}
-                    y2={ey}
-                    stroke="#666666"
-                    strokeWidth={1.5}
-                    strokeDasharray="4 2"
-                  />
-                  <circle
-                    cx={ex}
-                    cy={ey}
-                    r={2.5}
-                    fill="#666666"
-                  />
-                </g>
-              );
-            })}
-          </svg>
+                // Calculate arrow head
+                const arrowLength = 8;
+                const arrowWidth = 4;
+                const angle = Math.atan2(dy, dx);
+                const arrowAngle1 = angle - Math.PI / 6;
+                const arrowAngle2 = angle + Math.PI / 6;
 
-          {/* Time Picker Dropdown */}
-          {showTimePicker && (
-            <div
-              ref={timePickerRef}
-              style={{
+                const arrowX1 = endX - arrowLength * Math.cos(arrowAngle1);
+                const arrowY1 = endY - arrowLength * Math.sin(arrowAngle1);
+                const arrowX2 = endX - arrowLength * Math.cos(arrowAngle2);
+                const arrowY2 = endY - arrowLength * Math.sin(arrowAngle2);
+
+                return (
+                  <g key={index}>
+                    <line
+                      x1={startX}
+                      y1={startY}
+                      x2={endX}
+                      y2={endY}
+                      stroke="#666666"
+                      strokeWidth={1.5 / zoom}
+                      strokeDasharray={`${4 / zoom} ${2 / zoom}`}
+                      strokeOpacity="0.6"
+                    />
+                    <path
+                      d={`M ${endX} ${endY} L ${arrowX1} ${arrowY1} L ${arrowX2} ${arrowY2} Z`}
+                      fill="#666666"
+                      fillOpacity="0.6"
+                    />
+                  </g>
+                );
+              })}
+            </svg>
+
+            {/* Selection Box */}
+            {selectionBox && (
+              <div style={{
                 position: 'absolute',
-                left: `${timePickerPosition.x}px`,
-                top: `${timePickerPosition.y}px`,
-                background: 'white',
-                border: '1px solid rgba(0, 0, 0, 0.1)',
-                borderRadius: '8px',
-                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
-                zIndex: 1000,
-                display: 'flex',
-                padding: '8px',
-                gap: '8px'
-              }}
-            >
-              {/* Hours */}
-              <div style={{
-                maxHeight: '200px',
-                overflowY: 'auto',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '4px'
-              }}>
-                {hours.map(hour => (
-                  <button
-                    key={hour}
-                    onClick={() => handleTimeSelect(hour, '00')}
-                    style={{
-                      padding: '4px 8px',
-                      border: 'none',
-                      background: 'none',
-                      cursor: 'pointer',
-                      borderRadius: '4px',
-                      fontSize: '0.8rem',
-                      ':hover': {
-                        background: 'rgba(59, 130, 246, 0.1)'
-                      }
-                    }}
-                  >
-                    {hour}
-                  </button>
-                ))}
-              </div>
+                left: selectionBox.left,
+                top: selectionBox.top,
+                width: selectionBox.width,
+                height: selectionBox.height,
+                border: '1.5px solid rgba(59, 130, 246, 0.8)',
+                background: 'rgba(59, 130, 246, 0.1)',
+                pointerEvents: 'none',
+                zIndex: 1000
+              }} />
+            )}
 
-              {/* Minutes */}
-              <div style={{
-                maxHeight: '200px',
-                overflowY: 'auto',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '4px',
-                borderLeft: '1px solid rgba(0, 0, 0, 0.1)',
-                paddingLeft: '8px'
-              }}>
-                {minutes.map(minute => (
-                  <button
-                    key={minute}
-                    onClick={() => handleTimeSelect(selectedNodeForTime?.time?.split(':')[0] || '00', minute)}
-                    style={{
-                      padding: '4px 8px',
-                      border: 'none',
-                      background: 'none',
-                      cursor: 'pointer',
-                      borderRadius: '4px',
-                      fontSize: '0.8rem',
-                      ':hover': {
-                        background: 'rgba(59, 130, 246, 0.1)'
-                      }
-                    }}
-                  >
-                    {minute}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {nodes.map((node) => (
-            <Draggable
-              key={node.id}
-              bounds="parent"
-              position={{ x: node.x, y: node.y }}
-              onDrag={(e, data) => handleDrag(e, data, node.id)}
-              disabled={editingNode?.id === node.id}
-              onStart={(e) => {
-                // Prevent drag selection when starting to drag a node
-                e.stopPropagation();
-              }}
-            >
-              <div
-                className={`node ${selectedNodes.includes(node.id) ? "selected" : ""}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (e.shiftKey) {
-                    setSelectedNodes(prev => 
-                      prev.includes(node.id) 
-                        ? prev.filter(id => id !== node.id)
-                        : [...prev, node.id]
-                    );
-                  } else {
-                    handleClickNode(e, node.id);
-                  }
-                }}
-                onDoubleClick={(e) => handleDoubleClick(e, node)}
-                style={{
-                  position: "absolute",
-                  width: "auto",
-                  minWidth: "80px",
-                  maxWidth: "120px",
-                  minHeight: "45px",
-                  padding: "0.5rem",
-                  background: selectedNodes.includes(node.id)
-                    ? 'rgba(59, 130, 246, 0.15)'
-                    : (node.type === 'goal' ? 'rgba(34, 197, 94, 0.08)' :
-                       node.type === 'action' ? 'rgba(59, 130, 246, 0.08)' :
-                       'rgba(234, 179, 8, 0.08)'),
-                  borderRadius: "6px",
-                  border: `1.5px solid ${
-                    selectedNodes.includes(node.id)
-                      ? 'rgba(59, 130, 246, 0.5)'
-                      : (node.type === 'goal' ? 'rgba(34, 197, 94, 0.2)' :
-                         node.type === 'action' ? 'rgba(59, 130, 246, 0.2)' :
-                         'rgba(234, 179, 8, 0.2)')
-                  }`,
-                  cursor: editingNode?.id === node.id ? "default" : "move",
-                  fontSize: "0.6rem",
-                  userSelect: "none",
-                  zIndex: selectedNodes.includes(node.id) ? 1000 : 2,
-                  boxShadow: selectedNodes.includes(node.id)
-                    ? "0 0 0 2px rgba(59, 130, 246, 0.3)"
-                    : "0 1px 2px rgba(0,0,0,0.03)",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "0.25rem",
-                  transition: "all 0.15s ease-in-out"
-                }}
+            {/* Nodes - Now rendered after connections */}
+            {nodes.map((node) => (
+              <Draggable
+                key={node.id}
+                bounds="parent"
+                position={{ x: node.x, y: node.y }}
+                onDrag={(e, data) => handleDrag(e, data, node.id)}
+                onStart={handleDragStart}
+                onStop={handleDragStop}
+                disabled={editingNode?.id === node.id}
+                grid={[1, 1]}
+                scale={zoom}
+                defaultClassNameDragging="dragging"
+                defaultClassName="node"
+                defaultClassNameDragged="dragged"
               >
-                {/* Node Header */}
-                <div style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  width: "100%",
-                  marginBottom: "0.25rem"
-                }}>
-                  {/* Type Label */}
+                <div
+                  className={`node ${selectedNodes.includes(node.id) ? "selected" : ""}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (e.shiftKey) {
+                      setSelectedNodes(prev => 
+                        prev.includes(node.id) 
+                          ? prev.filter(id => id !== node.id)
+                          : [...prev, node.id]
+                      );
+                    } else {
+                      handleClickNode(e, node.id);
+                    }
+                  }}
+                  onDoubleClick={(e) => handleDoubleClick(e, node)}
+                  style={{
+                    ...getNodeStyle(node, selectedNodes.includes(node.id)),
+                    zIndex: selectedNodes.includes(node.id) ? 1000 : 2
+                  }}
+                >
+                  {/* Node Header */}
                   <div style={{
-                    fontSize: "0.65rem",
-                    color: node.type === 'goal' ? 'rgb(22, 163, 74)' :
-                           node.type === 'action' ? 'rgb(37, 99, 235)' :
-                           'rgb(202, 138, 4)',
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    fontWeight: "500",
-                    opacity: 0.9
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    width: "100%",
+                    marginBottom: "0.25rem"
                   }}>
-                    {node.type}
-                  </div>
-                  {/* Time Badge */}
-                  <div
-                    onClick={(e) => handleTimeClick(node, e)}
-                    style={{
+                    {/* Type Label */}
+                    <div style={{
                       fontSize: "0.65rem",
-                      color: "#666",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.25rem",
-                      background: "rgba(255, 255, 255, 0.5)",
-                      padding: "0.1rem 0.25rem",
-                      borderRadius: "3px",
-                      border: "1px solid rgba(0, 0, 0, 0.05)",
-                      cursor: "pointer",
-                      transition: "background 0.2s",
-                      ':hover': {
-                        background: "rgba(255, 255, 255, 0.8)"
-                      }
-                    }}
-                  >
-                    <span style={{ fontSize: "0.6rem", opacity: 0.7 }}>🕒</span>
-                    {node.time || "Set time"}
-                  </div>
-                </div>
-
-                {editingNode?.id === node.id ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    <input
-                      type="text"
-                      value={editingNode.newText}
-                      onChange={(e) => setEditingNode({
-                        ...editingNode,
-                        newText: e.target.value
-                      })}
+                      color: node.type === 'goal' ? 'rgb(22, 163, 74)' :
+                             node.type === 'action' ? 'rgb(37, 99, 235)' :
+                             'rgb(202, 138, 4)',
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      fontWeight: "500",
+                      opacity: 0.9
+                    }}>
+                      {node.type}
+                    </div>
+                    {/* Time Badge */}
+                    <div
+                      onClick={(e) => handleTimeClick(node, e)}
                       style={{
-                        width: '100%',
-                        fontSize: '0.7rem',
-                        padding: '0.25rem',
-                        border: '1px solid rgba(204, 204, 204, 0.5)',
-                        borderRadius: '4px'
-                      }}
-                      autoFocus
-                    />
-                    <input
-                      type="time"
-                      value={editingNode.newTime || ''}
-                      onChange={(e) => setEditingNode({
-                        ...editingNode,
-                        newTime: e.target.value
-                      })}
-                      style={{
-                        width: '100%',
-                        fontSize: '0.7rem',
-                        padding: '0.25rem',
-                        border: '1px solid rgba(204, 204, 204, 0.5)',
-                        borderRadius: '4px'
-                      }}
-                    />
-                    <button
-                      onClick={handleEditSave}
-                      style={{
-                        fontSize: '0.7rem',
-                        padding: '0.25rem',
-                        background: '#3b82f6',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: 'pointer'
+                        fontSize: "0.65rem",
+                        color: "#666",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.25rem",
+                        background: "rgba(255, 255, 255, 0.5)",
+                        padding: "0.1rem 0.25rem",
+                        borderRadius: "3px",
+                        border: "1px solid rgba(0, 0, 0, 0.05)",
+                        cursor: "pointer",
+                        transition: "background 0.2s",
+                        ':hover': {
+                          background: "rgba(255, 255, 255, 0.8)"
+                        }
                       }}
                     >
-                      Save
-                    </button>
+                      <span style={{ fontSize: "0.6rem", opacity: 0.7 }}>🕒</span>
+                      {node.time || "Set time"}
+                    </div>
                   </div>
-                ) : (
-                  <div style={{
-                    fontSize: "0.75rem",
-                    color: "#333",
-                    lineHeight: "1.3",
-                    wordBreak: "break-word"
-                  }}>
-                    {node.text}
-                  </div>
-                )}
-              </div>
-            </Draggable>
-          ))}
+
+                  {editingNode?.id === node.id ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <input
+                        type="text"
+                        value={editingNode.newText}
+                        onChange={(e) => setEditingNode({
+                          ...editingNode,
+                          newText: e.target.value
+                        })}
+                        style={{
+                          width: '100%',
+                          fontSize: '0.7rem',
+                          padding: '0.25rem',
+                          border: '1px solid rgba(204, 204, 204, 0.5)',
+                          borderRadius: '4px'
+                        }}
+                        autoFocus
+                      />
+                      <input
+                        type="time"
+                        value={editingNode.newTime || ''}
+                        onChange={(e) => setEditingNode({
+                          ...editingNode,
+                          newTime: e.target.value
+                        })}
+                        style={{
+                          width: '100%',
+                          fontSize: '0.7rem',
+                          padding: '0.25rem',
+                          border: '1px solid rgba(204, 204, 204, 0.5)',
+                          borderRadius: '4px'
+                        }}
+                      />
+                      <button
+                        onClick={handleEditSave}
+                        style={{
+                          fontSize: '0.7rem',
+                          padding: '0.25rem',
+                          background: '#3b82f6',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{
+                      fontSize: "0.75rem",
+                      color: "#333",
+                      lineHeight: "1.3",
+                      wordBreak: "break-word"
+                    }}>
+                      {node.text}
+                    </div>
+                  )}
+                </div>
+              </Draggable>
+            ))}
+          </div>
+
+          <ZoomControls />
         </div>
       </div>
 
@@ -1225,4 +1367,3 @@ export default function NodeCanvas() {
 }
 
 
-// change the code and make it beautiful 
