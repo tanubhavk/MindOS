@@ -12,11 +12,11 @@ export default function App() {
       <div className="app-container">
         <Navbar />
         <main className="main-content">
-          <Routes>
+        <Routes>
             <Route path="/" element={<HomePage />} />
-            <Route path="/daily-planner" element={<DailyPlanner />} />
+          <Route path="/daily-planner" element={<DailyPlanner />} />
             <Route path="/keybinds" element={<KeybindsAndRules />} />
-          </Routes>
+        </Routes>
         </main>
       </div>
     </Router>

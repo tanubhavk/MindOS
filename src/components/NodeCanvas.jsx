@@ -2,7 +2,19 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import Draggable from "react-draggable";
 import { v4 as uuidv4 } from "uuid";
 
+// Inject global CSS for hiding scrollbars
+if (typeof document !== 'undefined' && !document.getElementById('hide-scrollbar-style')) {
+  const style = document.createElement('style');
+  style.id = 'hide-scrollbar-style';
+  style.innerHTML = `.hide-scrollbar::-webkit-scrollbar { display: none !important; }`;
+  document.head.appendChild(style);
+}
+
 export default function NodeCanvas() {
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const savedTheme = localStorage.getItem("mindOS_theme");
+    return savedTheme === "dark";
+  });
   const [nodes, setNodes] = useState(() => {
     const savedNodes = localStorage.getItem("mindOS_nodes");
     return savedNodes ? JSON.parse(savedNodes) : [];
@@ -632,7 +644,7 @@ export default function NodeCanvas() {
     minHeight: "100%"
   };
 
-  // Update the getNodeStyle function to include smooth transitions
+  // Update the getNodeStyle function to include dark mode text and more opaque backgrounds
   const getNodeStyle = (node, isSelected) => ({
     position: "absolute",
     width: "auto",
@@ -641,34 +653,59 @@ export default function NodeCanvas() {
     minHeight: "45px",
     padding: "0.5rem",
     background: isSelected
-      ? 'rgba(59, 130, 246, 0.15)'
-      : (node.type === 'goal' ? 'rgba(34, 197, 94, 0.08)' :
-         node.type === 'action' ? 'rgba(59, 130, 246, 0.08)' :
-         'rgba(234, 179, 8, 0.08)'),
+      ? isDarkMode 
+        ? 'rgba(59, 130, 246, 0.5)'
+        : 'rgba(59, 130, 246, 0.15)'
+      : (node.type === 'goal' 
+          ? isDarkMode 
+            ? 'rgba(34, 197, 94, 0.35)'
+            : 'rgba(34, 197, 94, 0.08)'
+          : node.type === 'action' 
+            ? isDarkMode 
+              ? 'rgba(59, 130, 246, 0.35)'
+              : 'rgba(59, 130, 246, 0.08)'
+            : isDarkMode 
+              ? 'rgba(234, 179, 8, 0.35)'
+              : 'rgba(234, 179, 8, 0.08)'),
     borderRadius: "6px",
     border: `1.5px solid ${
       isSelected
-        ? 'rgba(59, 130, 246, 0.5)'
-        : (node.type === 'goal' ? 'rgba(34, 197, 94, 0.2)' :
-           node.type === 'action' ? 'rgba(59, 130, 246, 0.2)' :
-           'rgba(234, 179, 8, 0.2)')
+        ? isDarkMode 
+          ? 'rgba(59, 130, 246, 0.7)'
+          : 'rgba(59, 130, 246, 0.5)'
+        : (node.type === 'goal' 
+            ? isDarkMode 
+              ? 'rgba(34, 197, 94, 0.4)'
+              : 'rgba(34, 197, 94, 0.2)'
+            : node.type === 'action' 
+              ? isDarkMode 
+                ? 'rgba(59, 130, 246, 0.4)'
+                : 'rgba(59, 130, 246, 0.2)'
+              : isDarkMode 
+                ? 'rgba(234, 179, 8, 0.4)'
+                : 'rgba(234, 179, 8, 0.2)')
     }`,
     cursor: editingNode?.id === node.id ? "default" : "move",
     fontSize: `${0.6 / zoom}rem`,
     userSelect: "none",
     zIndex: isSelected ? 1000 : 2,
     boxShadow: isSelected
-      ? "0 0 0 2px rgba(59, 130, 246, 0.3)"
-      : "0 1px 2px rgba(0,0,0,0.03)",
+      ? isDarkMode 
+        ? "0 0 0 2px rgba(59, 130, 246, 0.5)"
+        : "0 0 0 2px rgba(59, 130, 246, 0.3)"
+      : isDarkMode 
+        ? "0 1px 2px rgba(0,0,0,0.2)"
+        : "0 1px 2px rgba(0,0,0,0.03)",
     display: "flex",
     flexDirection: "column",
     gap: "0.25rem",
     transition: "all 0.15s ease-in-out",
     willChange: "transform",
     touchAction: "none",
-    transform: `translate3d(0, 0, 0)`, // Force GPU acceleration
-    backfaceVisibility: "hidden", // Prevent flickering
-    perspective: "1000px" // Improve 3D rendering
+    transform: `translate3d(0, 0, 0)`,
+    backfaceVisibility: "hidden",
+    perspective: "1000px",
+    color: isDarkMode ? "#fff" : "#333"
   });
 
   // Update the ZoomControls component
@@ -792,8 +829,40 @@ export default function NodeCanvas() {
     return () => window.removeEventListener('keydown', handleUndo);
   }, []);
 
+  // Add theme toggle handler
+  const toggleTheme = () => {
+    setIsDarkMode(prev => {
+      const newTheme = !prev;
+      localStorage.setItem("mindOS_theme", newTheme ? "dark" : "light");
+      return newTheme;
+    });
+  };
+
+  // Add theme effect
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", isDarkMode ? "dark" : "light");
+  }, [isDarkMode]);
+
+  // Update the navbar (if present) to use dark background and light text in dark mode
+  useEffect(() => {
+    const navbar = document.querySelector('.navbar, nav, header');
+    if (navbar) {
+      if (isDarkMode) {
+        navbar.style.background = '#23272f';
+        navbar.style.color = '#fff';
+      } else {
+        navbar.style.background = '';
+        navbar.style.color = '';
+      }
+    }
+  }, [isDarkMode]);
+
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
+    <div style={{ 
+      display: "flex", 
+      height: "100vh",
+      background: isDarkMode ? "#1a1a1a" : "#ffffff"
+    }}>
       {/* Left Side */}
       <div style={{ flex: 3, display: "flex", flexDirection: "column" }}>
         <div className="toolbar" style={{ 
@@ -801,8 +870,8 @@ export default function NodeCanvas() {
           gap: "0.5rem", 
           display: "flex", 
           alignItems: "center", 
-          borderBottom: "1px solid rgba(204, 204, 204, 0.3)",
-          background: "white",
+          borderBottom: `1px solid ${isDarkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(204, 204, 204, 0.3)"}`,
+          background: isDarkMode ? "#2d2d2d" : "white",
           zIndex: 10
         }}>
           <input
@@ -815,7 +884,9 @@ export default function NodeCanvas() {
               fontSize: "0.8rem",
               height: "32px",
               borderRadius: "4px",
-              border: "1px solid rgba(204, 204, 204, 0.5)",
+              border: `1px solid ${isDarkMode ? "rgba(255, 255, 255, 0.2)" : "rgba(204, 204, 204, 0.5)"}`,
+              background: isDarkMode ? "#3d3d3d" : "white",
+              color: isDarkMode ? "#ffffff" : "#333",
               flex: 1
             }}
           />
@@ -830,7 +901,9 @@ export default function NodeCanvas() {
               fontSize: "0.8rem",
               height: "32px",
               borderRadius: "4px",
-              border: "1px solid rgba(204, 204, 204, 0.5)"
+              border: `1px solid ${isDarkMode ? "rgba(255, 255, 255, 0.2)" : "rgba(204, 204, 204, 0.5)"}`,
+              background: isDarkMode ? "#3d3d3d" : "white",
+              color: isDarkMode ? "#ffffff" : "#333"
             }}
           />
           <button 
@@ -924,8 +997,9 @@ export default function NodeCanvas() {
               padding: "0.5rem 1rem",
               fontSize: "0.8rem",
               height: "32px",
-              background: "#f3f4f6",
-              border: "1px solid rgba(204, 204, 204, 0.5)",
+              background: "#3b82f6",
+              color: "white",
+              border: "none",
               borderRadius: "4px",
               cursor: "pointer"
             }}
@@ -947,6 +1021,23 @@ export default function NodeCanvas() {
             }}
           >
             Clear Canvas
+          </button>
+
+          <button 
+            onClick={toggleTheme}
+            style={{
+              padding: "0.5rem 1rem",
+              fontSize: "0.8rem",
+              height: "32px",
+              background: isDarkMode ? "#3b82f6" : "#f3f4f6",
+              color: isDarkMode ? "white" : "#333",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              marginLeft: "0.5rem"
+            }}
+          >
+            {isDarkMode ? "🌙 Dark" : "☀️ Light"}
           </button>
         </div>
 
@@ -1027,7 +1118,10 @@ export default function NodeCanvas() {
         <div 
           className="canvas" 
           ref={canvasRef} 
-          style={canvasStyle}
+          style={{
+            ...canvasStyle,
+            background: isDarkMode ? "#1a1a1a" : "white"
+          }}
           onClick={e => {
             // Only clear if clicking the canvas background itself
             if (e.target === canvasRef.current) {
@@ -1037,7 +1131,7 @@ export default function NodeCanvas() {
           }}
         >
           <div style={contentStyle}>
-            {/* Connection lines - Moved before nodes to render behind them */}
+            {/* Connection lines */}
             {showArrows && (
               <svg className="connection-lines" style={{ 
                 position: "absolute", 
@@ -1092,15 +1186,15 @@ export default function NodeCanvas() {
                         y1={startY}
                         x2={endX}
                         y2={endY}
-                        stroke="#666666"
+                        stroke={isDarkMode ? "#666666" : "#666666"}
                         strokeWidth={1.5 / zoom}
                         strokeDasharray={`${4 / zoom} ${2 / zoom}`}
-                        strokeOpacity="0.6"
+                        strokeOpacity={isDarkMode ? "0.4" : "0.6"}
                       />
                       <path
                         d={`M ${endX} ${endY} L ${arrowX1} ${arrowY1} L ${arrowX2} ${arrowY2} Z`}
-                        fill="#666666"
-                        fillOpacity="0.6"
+                        fill={isDarkMode ? "#666666" : "#666666"}
+                        fillOpacity={isDarkMode ? "0.4" : "0.6"}
                       />
                     </g>
                   );
@@ -1175,9 +1269,9 @@ export default function NodeCanvas() {
                     {/* Type Label */}
                     <div style={{
                       fontSize: "0.65rem",
-                      color: node.type === 'goal' ? 'rgb(22, 163, 74)' :
-                             node.type === 'action' ? 'rgb(37, 99, 235)' :
-                             'rgb(202, 138, 4)',
+                      color: node.type === 'goal' ? (isDarkMode ? '#6ee7b7' : 'rgb(22, 163, 74)') :
+                             node.type === 'action' ? (isDarkMode ? '#93c5fd' : 'rgb(37, 99, 235)') :
+                             (isDarkMode ? '#fde68a' : 'rgb(202, 138, 4)'),
                       textTransform: "uppercase",
                       letterSpacing: "0.05em",
                       fontWeight: "500",
@@ -1190,7 +1284,7 @@ export default function NodeCanvas() {
                       onClick={(e) => handleTimeClick(node, e)}
                       style={{
                         fontSize: "0.65rem",
-                        color: "#666",
+                        color: isDarkMode ? '#fff' : '#666',
                         display: "flex",
                         alignItems: "center",
                         gap: "0.25rem",
@@ -1264,7 +1358,7 @@ export default function NodeCanvas() {
                   ) : (
                     <div style={{
                       fontSize: "0.75rem",
-                      color: "#333",
+                      color: isDarkMode ? "#fff" : "#333",
                       lineHeight: "1.3",
                       wordBreak: "break-word"
                     }}>
@@ -1287,45 +1381,49 @@ export default function NodeCanvas() {
         flexDirection: "column", 
         gap: "1rem", 
         padding: "1.5rem",
-        paddingTop: "2rem", // Extra top padding to avoid navbar overlap
-        maxHeight: "calc(100vh - 4rem)", // Account for top and bottom spacing
+        paddingTop: "2rem",
+        maxHeight: "calc(100vh - 4rem)",
         overflow: "hidden",
         zIndex: 5,
-        background: "white",
-        borderLeft: "1px solid rgba(204, 204, 204, 0.3)",
-        position: "relative" // For proper stacking context
+        background: isDarkMode ? "#2d2d2d" : "white",
+        borderLeft: `1px solid ${isDarkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(204, 204, 204, 0.3)"}`,
+        position: "relative"
       }}>
         {/* Task Sequence Section */}
         <div style={{
           flex: 1,
           padding: "2rem",
-          background: "rgba(247, 247, 247, 0.7)",
+          background: isDarkMode ? "rgba(45, 45, 45, 0.7)" : "rgba(247, 247, 247, 0.7)",
           overflowY: "auto",
           backdropFilter: "blur(4px)",
           borderRadius: "12px",
-          boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)",
-          border: "1px solid rgba(255, 255, 255, 0.7)",
+          boxShadow: isDarkMode ? "0 2px 4px rgba(0, 0, 0, 0.2)" : "0 2px 4px rgba(0, 0, 0, 0.05)",
+          border: isDarkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(255, 255, 255, 0.7)",
           display: "flex",
           flexDirection: "column",
-          gap: "1.5rem"
-        }}>
+          gap: "1.5rem",
+          scrollbarWidth: "none", // Firefox
+          msOverflowStyle: "none", // IE/Edge
+        }}
+          className="hide-scrollbar"
+        >
           <div style={{
             position: "sticky",
             top: 0,
             display: "flex",
             alignItems: "center",
             padding: "1rem 1.25rem",
-            background: "rgba(255, 255, 255, 0.9)",
+            background: isDarkMode ? "rgba(45, 45, 45, 0.9)" : "rgba(255, 255, 255, 0.9)",
             borderRadius: "8px",
-            border: "1px solid rgba(204, 204, 204, 0.3)",
-            boxShadow: "0 1px 2px rgba(0, 0, 0, 0.02)",
+            border: `1px solid ${isDarkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(204, 204, 204, 0.3)"}`,
+            boxShadow: isDarkMode ? "0 1px 2px rgba(0, 0, 0, 0.1)" : "0 1px 2px rgba(0, 0, 0, 0.02)",
             backdropFilter: "blur(8px)",
             zIndex: 1
           }}>
             <h3 style={{ 
               fontSize: "1rem",
               fontWeight: "600",
-              color: "#333",
+              color: isDarkMode ? "#ffffff" : "#333",
               margin: 0
             }}>Task Sequence</h3>
           </div>
@@ -1344,31 +1442,31 @@ export default function NodeCanvas() {
               <li key={node.id} style={{ 
                 marginBottom: "0.25rem",
                 padding: "1rem 1.25rem",
-                background: "rgba(255, 255, 255, 0.7)",
+                background: isDarkMode ? "rgba(45, 45, 45, 0.7)" : "rgba(255, 255, 255, 0.7)",
                 borderRadius: "8px",
-                border: "1px solid rgba(204, 204, 204, 0.3)",
+                border: `1px solid ${isDarkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(204, 204, 204, 0.3)"}`,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: "1rem",
-                boxShadow: "0 1px 2px rgba(0, 0, 0, 0.02)",
+                boxShadow: isDarkMode ? "0 1px 2px rgba(0, 0, 0, 0.1)" : "0 1px 2px rgba(0, 0, 0, 0.02)",
                 transition: "all 0.2s ease",
                 cursor: "default",
                 position: "relative"
               }}>
                 <span style={{ 
-                  color: "#333", 
+                  color: isDarkMode ? "#ffffff" : "#333", 
                   flex: 1,
                   lineHeight: "1.5"
                 }}>{node.text}</span>
                 {node.time && (
                   <span style={{ 
-                    color: "#666",
+                    color: isDarkMode ? "#cccccc" : "#666",
                     fontSize: "0.8rem",
                     padding: "4px 10px",
-                    background: "rgba(255, 255, 255, 0.8)",
+                    background: isDarkMode ? "rgba(45, 45, 45, 0.8)" : "rgba(255, 255, 255, 0.8)",
                     borderRadius: "6px",
-                    border: "1px solid rgba(204, 204, 204, 0.2)",
+                    border: `1px solid ${isDarkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(204, 204, 204, 0.2)"}`,
                     whiteSpace: "nowrap",
                     display: "flex",
                     alignItems: "center",
@@ -1387,27 +1485,31 @@ export default function NodeCanvas() {
         <div style={{
           flex: 1,
           padding: "1rem",
-          background: "rgba(247, 247, 247, 0.7)",
+          background: isDarkMode ? "rgba(45, 45, 45, 0.7)" : "rgba(247, 247, 247, 0.7)",
           overflowY: "auto",
           backdropFilter: "blur(4px)",
           borderRadius: "8px",
-          boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)",
-          border: "1px solid rgba(255, 255, 255, 0.7)"
-        }}>
+          boxShadow: isDarkMode ? "0 2px 4px rgba(0, 0, 0, 0.2)" : "0 2px 4px rgba(0, 0, 0, 0.05)",
+          border: isDarkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(255, 255, 255, 0.7)",
+          scrollbarWidth: "none", // Firefox
+          msOverflowStyle: "none", // IE/Edge
+        }}
+          className="hide-scrollbar"
+        >
           <div style={{ 
             display: "flex", 
             justifyContent: "space-between", 
             alignItems: "center",
             marginBottom: "1rem",
             padding: "0.5rem",
-            background: "rgba(255, 255, 255, 0.5)",
+            background: isDarkMode ? "rgba(45, 45, 45, 0.5)" : "rgba(255, 255, 255, 0.5)",
             borderRadius: "6px",
-            border: "1px solid rgba(204, 204, 204, 0.3)"
+            border: `1px solid ${isDarkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(204, 204, 204, 0.3)"}`
           }}>
             <h3 style={{ 
               fontSize: "0.9rem",
               fontWeight: "600",
-              color: "#333",
+              color: isDarkMode ? "#ffffff" : "#333",
               margin: 0
             }}>Saved Plans</h3>
             <select
@@ -1416,9 +1518,9 @@ export default function NodeCanvas() {
               style={{
                 padding: "2px 8px",
                 borderRadius: "4px",
-                border: "1px solid rgba(204, 204, 204, 0.5)",
-                background: "rgba(255, 255, 255, 0.9)",
-                color: "#333",
+                border: `1px solid ${isDarkMode ? "rgba(255, 255, 255, 0.2)" : "rgba(204, 204, 204, 0.5)"}`,
+                background: isDarkMode ? "rgba(45, 45, 45, 0.9)" : "rgba(255, 255, 255, 0.9)",
+                color: isDarkMode ? "#ffffff" : "#333",
                 fontSize: "0.8rem",
                 height: "24px"
               }}
@@ -1435,10 +1537,10 @@ export default function NodeCanvas() {
           {Object.entries(savedPlans).length === 0 ? (
             <div style={{ 
               padding: "0.75rem",
-              background: "rgba(255, 255, 255, 0.5)",
+              background: isDarkMode ? "rgba(45, 45, 45, 0.5)" : "rgba(255, 255, 255, 0.5)",
               borderRadius: "6px",
-              border: "1px solid rgba(204, 204, 204, 0.3)",
-              color: "#666",
+              border: `1px solid ${isDarkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(204, 204, 204, 0.3)"}`,
+              color: isDarkMode ? "#cccccc" : "#666",
               textAlign: "center",
               fontSize: "0.8rem"
             }}>
@@ -1450,9 +1552,9 @@ export default function NodeCanvas() {
                 <li key={name} style={{ 
                   marginBottom: "0.5rem",
                   padding: "0.75rem",
-                  background: "rgba(255, 255, 255, 0.5)",
+                  background: isDarkMode ? "rgba(45, 45, 45, 0.5)" : "rgba(255, 255, 255, 0.5)",
                   borderRadius: "6px",
-                  border: "1px solid rgba(204, 204, 204, 0.3)"
+                  border: `1px solid ${isDarkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(204, 204, 204, 0.3)"}`
                 }}>
                   <div style={{ 
                     display: "flex", 
@@ -1460,14 +1562,17 @@ export default function NodeCanvas() {
                     alignItems: "center",
                     marginBottom: "0.5rem"
                   }}>
-                    <span style={{ fontWeight: "500" }}>{name}</span>
+                    <span style={{ 
+                      fontWeight: "500",
+                      color: isDarkMode ? "#ffffff" : "#333"
+                    }}>{name}</span>
                     <span style={{
                       fontSize: "0.75rem",
-                      color: "#666",
+                      color: isDarkMode ? "#cccccc" : "#666",
                       padding: "2px 6px",
-                      background: "rgba(255, 255, 255, 0.5)",
+                      background: isDarkMode ? "rgba(45, 45, 45, 0.5)" : "rgba(255, 255, 255, 0.5)",
                       borderRadius: "4px",
-                      border: "1px solid rgba(204, 204, 204, 0.2)"
+                      border: `1px solid ${isDarkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(204, 204, 204, 0.2)"}`
                     }}>
                       {new Date(plan.lastUpdated).toLocaleDateString()}
                     </span>
@@ -1477,7 +1582,7 @@ export default function NodeCanvas() {
                     gridTemplateColumns: "repeat(3, 1fr)",
                     gap: "0.5rem",
                     fontSize: "0.75rem",
-                    color: "#666"
+                    color: isDarkMode ? "#cccccc" : "#666"
                   }}>
                     {[
                       { label: "Goals", count: plan.goals.length },
@@ -1486,13 +1591,16 @@ export default function NodeCanvas() {
                     ].map(({ label, count }) => (
                       <div key={label} style={{
                         padding: "0.25rem",
-                        background: "rgba(255, 255, 255, 0.3)",
+                        background: isDarkMode ? "rgba(45, 45, 45, 0.3)" : "rgba(255, 255, 255, 0.3)",
                         borderRadius: "4px",
-                        border: "1px solid rgba(204, 204, 204, 0.2)",
+                        border: `1px solid ${isDarkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(204, 204, 204, 0.2)"}`,
                         textAlign: "center"
                       }}>
-                        <div style={{ fontWeight: "500" }}>{label}</div>
-                        <div>{count}</div>
+                        <div style={{ 
+                          fontWeight: "500",
+                          color: isDarkMode ? "#ffffff" : "#333"
+                        }}>{label}</div>
+                        <div style={{ color: isDarkMode ? "#cccccc" : "#666" }}>{count}</div>
                       </div>
                     ))}
                   </div>

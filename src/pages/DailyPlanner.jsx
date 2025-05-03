@@ -122,7 +122,7 @@ export default function DailyPlanner() {
       const planName = prompt("Enter a name for this plan:", "My Plan");
       if (!planName) return;
 
-      const plan = {
+    const plan = {
         goals: goals.filter(item => item.text.trim() !== ""),
         actions: actions.filter(item => item.text.trim() !== ""),
         hobbies: hobbies.filter(item => item.text.trim() !== ""),
@@ -138,7 +138,7 @@ export default function DailyPlanner() {
       setSavedPlans(updatedPlans);
       setSelectedPlan(planName);
       setEditingPlanName(planName);
-      alert("Your daily plan is saved!");
+    alert("Your daily plan is saved!");
     }
   };
 
@@ -212,7 +212,7 @@ export default function DailyPlanner() {
           marginBottom: "0.75rem",
           alignItems: "center"
         }}>
-          <input
+        <input
             style={{
               flex: 1,
               padding: "0.75rem 1rem",
@@ -221,10 +221,10 @@ export default function DailyPlanner() {
               background: "rgba(255, 255, 255, 0.9)",
               fontSize: "0.95rem"
             }}
-            placeholder={`Enter ${label.toLowerCase()} ${i + 1}`}
+          placeholder={`Enter ${label.toLowerCase()} ${i + 1}`}
             value={v.text || ""}
             onChange={(e) => updateField(setter, i, { ...v, text: e.target.value })}
-          />
+        />
           <input
             type="number"
             min="0"
@@ -415,16 +415,16 @@ export default function DailyPlanner() {
               />
             </div>
           )}
-          {renderList("Goals", goals, setGoals)}
-          {renderList("Action Tasks", actions, setActions)}
-          {renderList("Hobbies", hobbies, setHobbies)}
+      {renderList("Goals", goals, setGoals)}
+      {renderList("Action Tasks", actions, setActions)}
+      {renderList("Hobbies", hobbies, setHobbies)}
           <div style={{
             display: "flex",
             gap: "1rem",
             marginTop: "2rem"
           }}>
-            <button
-              onClick={handleSubmit}
+      <button
+        onClick={handleSubmit}
               style={{
                 padding: "0.75rem 1.5rem",
                 background: "rgba(22, 163, 74, 0.9)",
@@ -448,7 +448,7 @@ export default function DailyPlanner() {
               }}
             >
               Clear Current
-            </button>
+      </button>
           </div>
         </div>
 
