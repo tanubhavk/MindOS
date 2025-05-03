@@ -17,15 +17,17 @@ export default function NodeCanvas() {
   const [savedPlans, setSavedPlans] = useState({});
   const [selectedPlan, setSelectedPlan] = useState("");
   const [editingNode, setEditingNode] = useState(null);
-  const [selectionBox, setSelectionBox] = useState(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const canvasRef = useRef(null);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [timePickerPosition, setTimePickerPosition] = useState({ x: 0, y: 0 });
   const [selectedNodeForTime, setSelectedNodeForTime] = useState(null);
   const timePickerRef = useRef(null);
   const [zoom, setZoom] = useState(1);
+  const [showArrows, setShowArrows] = useState(true);
+  const [isMultiEditing, setIsMultiEditing] = useState(false);
+  const [multiEditText, setMultiEditText] = useState("");
+  const [multiEditTime, setMultiEditTime] = useState("");
+  const [history, setHistory] = useState([]);
 
   // Load saved plans on component mount
   useEffect(() => {
@@ -100,6 +102,12 @@ export default function NodeCanvas() {
   useEffect(() => {
     localStorage.setItem("mindOS_nodes", JSON.stringify(nodes));
     localStorage.setItem("mindOS_connections", JSON.stringify(connections));
+  }, [nodes, connections]);
+
+  // Push to history on every nodes/connections change
+  useEffect(() => {
+    setHistory(prev => [...prev, { nodes, connections }]);
+    // eslint-disable-next-line
   }, [nodes, connections]);
 
   const handleAddNode = () => {
@@ -476,110 +484,6 @@ export default function NodeCanvas() {
     setEditingNode(null);
   };
 
-  // Handle drag selection
-  const handleCanvasMouseDown = (e) => {
-    // Only start selection if clicking directly on the canvas background
-    if (e.target === canvasRef.current) {
-      const rect = canvasRef.current.getBoundingClientRect();
-      const scrollLeft = canvasRef.current.scrollLeft || 0;
-      const scrollTop = canvasRef.current.scrollTop || 0;
-      
-      const x = e.clientX - rect.left + scrollLeft;
-      const y = e.clientY - rect.top + scrollTop;
-      
-      setIsDragging(true);
-      setDragStart({ x, y });
-      setSelectionBox({
-        left: x,
-        top: y,
-        width: 0,
-        height: 0
-      });
-      
-      // Only clear selection if not holding shift
-      if (!e.shiftKey) {
-        setSelectedNodes([]);
-      }
-    }
-  };
-
-  const handleCanvasMouseMove = (e) => {
-    if (!isDragging || !canvasRef.current) return;
-
-    const rect = canvasRef.current.getBoundingClientRect();
-    const scrollLeft = canvasRef.current.scrollLeft || 0;
-    const scrollTop = canvasRef.current.scrollTop || 0;
-    
-    const currentX = e.clientX - rect.left + scrollLeft;
-    const currentY = e.clientY - rect.top + scrollTop;
-
-    const newSelectionBox = {
-      left: Math.min(dragStart.x, currentX),
-      top: Math.min(dragStart.y, currentY),
-      width: Math.abs(currentX - dragStart.x),
-      height: Math.abs(currentY - dragStart.y)
-    };
-
-    setSelectionBox(newSelectionBox);
-
-    // Select nodes that intersect with the selection box
-    const selectedIds = nodes.filter(node => {
-      const nodeRect = {
-        left: node.x,
-        top: node.y,
-        right: node.x + 80, // Node width
-        bottom: node.y + 45 // Node height
-      };
-
-      return (
-        nodeRect.left < newSelectionBox.left + newSelectionBox.width &&
-        nodeRect.right > newSelectionBox.left &&
-        nodeRect.top < newSelectionBox.top + newSelectionBox.height &&
-        nodeRect.bottom > newSelectionBox.top
-      );
-    }).map(node => node.id);
-
-    // Update selection, preserving previous selection if shift is held
-    setSelectedNodes(prev => {
-      if (e.shiftKey) {
-        return [...new Set([...prev, ...selectedIds])];
-      }
-      return selectedIds;
-    });
-  };
-
-  const handleCanvasMouseUp = () => {
-    if (isDragging) {
-      setIsDragging(false);
-      setSelectionBox(null);
-    }
-  };
-
-  // Add event listeners for canvas
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const handleMouseLeave = () => {
-      if (isDragging) {
-        setIsDragging(false);
-        setSelectionBox(null);
-      }
-    };
-
-    canvas.addEventListener('mousedown', handleCanvasMouseDown);
-    canvas.addEventListener('mousemove', handleCanvasMouseMove);
-    canvas.addEventListener('mouseup', handleCanvasMouseUp);
-    canvas.addEventListener('mouseleave', handleMouseLeave);
-
-    return () => {
-      canvas.removeEventListener('mousedown', handleCanvasMouseDown);
-      canvas.removeEventListener('mousemove', handleCanvasMouseMove);
-      canvas.removeEventListener('mouseup', handleCanvasMouseUp);
-      canvas.removeEventListener('mouseleave', handleMouseLeave);
-    };
-  }, [isDragging, dragStart, nodes]);
-
   // Generate time options
   const generateTimeOptions = () => {
     const hours = Array.from({ length: 24 }, (_, i) => 
@@ -679,6 +583,18 @@ export default function NodeCanvas() {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, []);
 
+  // Deselect all on Escape
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') {
+        setSelectedNodes([]);
+        setEditingNode(null);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, []);
+
   // Add wheel event listener for zooming
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -700,7 +616,7 @@ export default function NodeCanvas() {
     padding: "1rem",
     minWidth: "100%",
     minHeight: "100%",
-    cursor: isDragging ? "crosshair" : "default",
+    cursor: "default",
     userSelect: "none"
   };
 
@@ -811,6 +727,71 @@ export default function NodeCanvas() {
     </div>
   );
 
+  // Add function to handle multi-edit
+  const handleMultiEdit = () => {
+    if (selectedNodes.length === 0) return;
+    
+    setIsMultiEditing(true);
+    // Set initial values from the first selected node
+    const firstNode = nodes.find(node => node.id === selectedNodes[0]);
+    if (firstNode) {
+      setMultiEditText(firstNode.text);
+      setMultiEditTime(firstNode.time || "");
+    }
+  };
+
+  // Add function to save multi-edit
+  const handleMultiEditSave = () => {
+    setNodes(prevNodes =>
+      prevNodes.map(node =>
+        selectedNodes.includes(node.id)
+          ? {
+              ...node,
+              text: multiEditText,
+              time: multiEditTime || node.time
+            }
+          : node
+      )
+    );
+    setIsMultiEditing(false);
+    setMultiEditText("");
+    setMultiEditTime("");
+  };
+
+  // Add function to handle multi-delete
+  const handleMultiDelete = () => {
+    if (selectedNodes.length === 0) return;
+    
+    if (window.confirm(`Are you sure you want to delete ${selectedNodes.length} selected nodes?`)) {
+      setNodes(prevNodes => prevNodes.filter(node => !selectedNodes.includes(node.id)));
+      setConnections(prevConnections =>
+        prevConnections.filter(
+          conn => !selectedNodes.includes(conn.from) && !selectedNodes.includes(conn.to)
+        )
+      );
+      setSelectedNodes([]);
+    }
+  };
+
+  // Undo handler (Cmd+Z or Ctrl+Z)
+  useEffect(() => {
+    const handleUndo = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        setHistory(prev => {
+          if (prev.length < 2) return prev;
+          const newHistory = prev.slice(0, -1);
+          const last = newHistory[newHistory.length - 1];
+          setNodes(last.nodes);
+          setConnections(last.connections);
+          return newHistory;
+        });
+      }
+    };
+    window.addEventListener('keydown', handleUndo);
+    return () => window.removeEventListener('keydown', handleUndo);
+  }, []);
+
   return (
     <div style={{ display: "flex", height: "100vh" }}>
       {/* Left Side */}
@@ -868,6 +849,74 @@ export default function NodeCanvas() {
           >
             Add Node
           </button>
+          <button
+            onClick={() => setShowArrows((prev) => !prev)}
+            style={{
+              padding: "0.5rem 1rem",
+              fontSize: "0.8rem",
+              height: "32px",
+              background: showArrows ? "#f3f4f6" : "#fee2e2",
+              color: showArrows ? "#2563eb" : "#dc2626",
+              border: showArrows ? "1px solid #2563eb33" : "1px solid #dc262633",
+              borderRadius: "4px",
+              cursor: "pointer",
+              marginLeft: "0.5rem"
+            }}
+          >
+            {showArrows ? "Hide Arrows" : "Show Arrows"}
+          </button>
+
+          {/* Multi-edit controls */}
+          {selectedNodes.length > 0 && (
+            <>
+              <div style={{ 
+                display: "flex", 
+                gap: "0.5rem", 
+                padding: "0 0.5rem", 
+                borderLeft: "1px solid rgba(204, 204, 204, 0.3)",
+                borderRight: "1px solid rgba(204, 204, 204, 0.3)"
+              }}>
+                <span style={{ 
+                  fontSize: "0.8rem", 
+                  color: "#666",
+                  display: "flex",
+                  alignItems: "center"
+                }}>
+                  {selectedNodes.length} selected
+                </span>
+                <button 
+                  onClick={handleMultiEdit}
+                  style={{ 
+                    padding: "0.5rem 1rem",
+                    fontSize: "0.8rem",
+                    height: "32px",
+                    background: "#f3f4f6",
+                    border: "1px solid rgba(204, 204, 204, 0.5)",
+                    borderRadius: "4px",
+                    cursor: "pointer"
+                  }}
+                >
+                  Edit Selected
+                </button>
+                <button 
+                  onClick={handleMultiDelete}
+                  style={{ 
+                    padding: "0.5rem 1rem",
+                    fontSize: "0.8rem",
+                    height: "32px",
+                    background: "#fee2e2",
+                    color: "#dc2626",
+                    border: "1px solid rgba(220, 38, 38, 0.2)",
+                    borderRadius: "4px",
+                    cursor: "pointer"
+                  }}
+                >
+                  Delete Selected
+                </button>
+              </div>
+            </>
+          )}
+
           <button 
             className="button" 
             onClick={resetPositions}
@@ -901,94 +950,162 @@ export default function NodeCanvas() {
           </button>
         </div>
 
+        {/* Multi-edit modal */}
+        {isMultiEditing && (
+          <div style={{
+            position: "fixed",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            background: "white",
+            padding: "1.5rem",
+            borderRadius: "8px",
+            boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+            zIndex: 1000,
+            minWidth: "300px"
+          }}>
+            <h3 style={{ margin: "0 0 1rem 0", fontSize: "1rem" }}>
+              Edit {selectedNodes.length} Nodes
+            </h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              <input
+                type="text"
+                value={multiEditText}
+                onChange={(e) => setMultiEditText(e.target.value)}
+                placeholder="Enter text for all selected nodes"
+                style={{
+                  padding: "0.5rem",
+                  fontSize: "0.9rem",
+                  borderRadius: "4px",
+                  border: "1px solid rgba(204, 204, 204, 0.5)"
+                }}
+              />
+              <input
+                type="time"
+                value={multiEditTime}
+                onChange={(e) => setMultiEditTime(e.target.value)}
+                style={{
+                  padding: "0.5rem",
+                  fontSize: "0.9rem",
+                  borderRadius: "4px",
+                  border: "1px solid rgba(204, 204, 204, 0.5)"
+                }}
+              />
+              <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+                <button
+                  onClick={() => setIsMultiEditing(false)}
+                  style={{
+                    padding: "0.5rem 1rem",
+                    fontSize: "0.9rem",
+                    background: "#f3f4f6",
+                    border: "1px solid rgba(204, 204, 204, 0.5)",
+                    borderRadius: "4px",
+                    cursor: "pointer"
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleMultiEditSave}
+                  style={{
+                    padding: "0.5rem 1rem",
+                    fontSize: "0.9rem",
+                    background: "#3b82f6",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "4px",
+                    cursor: "pointer"
+                  }}
+                >
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div 
           className="canvas" 
           ref={canvasRef} 
           style={canvasStyle}
+          onClick={e => {
+            // Only clear if clicking the canvas background itself
+            if (e.target === canvasRef.current) {
+              setSelectedNodes([]);
+              setEditingNode(null);
+            }
+          }}
         >
           <div style={contentStyle}>
             {/* Connection lines - Moved before nodes to render behind them */}
-            <svg className="connection-lines" style={{ 
-              position: "absolute", 
-              width: "100%", 
-              height: "100%",
-              pointerEvents: "none",
-              zIndex: 1,
-              transform: `translate3d(0, 0, 0)`,
-              willChange: "transform"
-            }}>
-              {connections.map(({ from, to }, index) => {
-                const fromNode = getNodeById(from);
-                const toNode = getNodeById(to);
-                if (!fromNode || !toNode) return null;
+            {showArrows && (
+              <svg className="connection-lines" style={{ 
+                position: "absolute", 
+                width: "100%", 
+                height: "100%",
+                pointerEvents: "none",
+                zIndex: 1,
+                transform: `translate3d(0, 0, 0)`,
+                willChange: "transform"
+              }}>
+                {connections.map(({ from, to }, index) => {
+                  const fromNode = getNodeById(from);
+                  const toNode = getNodeById(to);
+                  if (!fromNode || !toNode) return null;
 
-                // Calculate node centers
-                const fromCenterX = fromNode.x + 40; // Half of node width (80/2)
-                const fromCenterY = fromNode.y + 22.5; // Half of node height (45/2)
-                const toCenterX = toNode.x + 40;
-                const toCenterY = toNode.y + 22.5;
+                  // Calculate node centers
+                  const fromCenterX = fromNode.x + 40; // Half of node width (80/2)
+                  const fromCenterY = fromNode.y + 22.5; // Half of node height (45/2)
+                  const toCenterX = toNode.x + 40;
+                  const toCenterY = toNode.y + 22.5;
 
-                // Calculate direction vector
-                const dx = toCenterX - fromCenterX;
-                const dy = toCenterY - fromCenterY;
-                const len = Math.sqrt(dx * dx + dy * dy);
+                  // Calculate direction vector
+                  const dx = toCenterX - fromCenterX;
+                  const dy = toCenterY - fromCenterY;
+                  const len = Math.sqrt(dx * dx + dy * dy);
 
-                // Calculate node radius (approximate)
-                const nodeRadius = 35; // Average of width and height
+                  // Calculate node radius (approximate)
+                  const nodeRadius = 35; // Average of width and height
 
-                // Calculate start and end points
-                const startX = fromCenterX + (dx / len) * nodeRadius;
-                const startY = fromCenterY + (dy / len) * nodeRadius;
-                const endX = toCenterX - (dx / len) * nodeRadius;
-                const endY = toCenterY - (dy / len) * nodeRadius;
+                  // Calculate start and end points
+                  const startX = fromCenterX + (dx / len) * nodeRadius;
+                  const startY = fromCenterY + (dy / len) * nodeRadius;
+                  const endX = toCenterX - (dx / len) * nodeRadius;
+                  const endY = toCenterY - (dy / len) * nodeRadius;
 
-                // Calculate arrow head
-                const arrowLength = 8;
-                const arrowWidth = 4;
-                const angle = Math.atan2(dy, dx);
-                const arrowAngle1 = angle - Math.PI / 6;
-                const arrowAngle2 = angle + Math.PI / 6;
+                  // Calculate arrow head
+                  const arrowLength = 8;
+                  const arrowWidth = 4;
+                  const angle = Math.atan2(dy, dx);
+                  const arrowAngle1 = angle - Math.PI / 6;
+                  const arrowAngle2 = angle + Math.PI / 6;
 
-                const arrowX1 = endX - arrowLength * Math.cos(arrowAngle1);
-                const arrowY1 = endY - arrowLength * Math.sin(arrowAngle1);
-                const arrowX2 = endX - arrowLength * Math.cos(arrowAngle2);
-                const arrowY2 = endY - arrowLength * Math.sin(arrowAngle2);
+                  const arrowX1 = endX - arrowLength * Math.cos(arrowAngle1);
+                  const arrowY1 = endY - arrowLength * Math.sin(arrowAngle1);
+                  const arrowX2 = endX - arrowLength * Math.cos(arrowAngle2);
+                  const arrowY2 = endY - arrowLength * Math.sin(arrowAngle2);
 
-                return (
-                  <g key={index}>
-                    <line
-                      x1={startX}
-                      y1={startY}
-                      x2={endX}
-                      y2={endY}
-                      stroke="#666666"
-                      strokeWidth={1.5 / zoom}
-                      strokeDasharray={`${4 / zoom} ${2 / zoom}`}
-                      strokeOpacity="0.6"
-                    />
-                    <path
-                      d={`M ${endX} ${endY} L ${arrowX1} ${arrowY1} L ${arrowX2} ${arrowY2} Z`}
-                      fill="#666666"
-                      fillOpacity="0.6"
-                    />
-                  </g>
-                );
-              })}
-            </svg>
-
-            {/* Selection Box */}
-            {selectionBox && (
-              <div style={{
-                position: 'absolute',
-                left: selectionBox.left,
-                top: selectionBox.top,
-                width: selectionBox.width,
-                height: selectionBox.height,
-                border: '1.5px solid rgba(59, 130, 246, 0.8)',
-                background: 'rgba(59, 130, 246, 0.1)',
-                pointerEvents: 'none',
-                zIndex: 1000
-              }} />
+                  return (
+                    <g key={index}>
+                      <line
+                        x1={startX}
+                        y1={startY}
+                        x2={endX}
+                        y2={endY}
+                        stroke="#666666"
+                        strokeWidth={1.5 / zoom}
+                        strokeDasharray={`${4 / zoom} ${2 / zoom}`}
+                        strokeOpacity="0.6"
+                      />
+                      <path
+                        d={`M ${endX} ${endY} L ${arrowX1} ${arrowY1} L ${arrowX2} ${arrowY2} Z`}
+                        fill="#666666"
+                        fillOpacity="0.6"
+                      />
+                    </g>
+                  );
+                })}
+              </svg>
             )}
 
             {/* Nodes - Now rendered after connections */}
@@ -1011,14 +1128,34 @@ export default function NodeCanvas() {
                   className={`node ${selectedNodes.includes(node.id) ? "selected" : ""}`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (e.shiftKey) {
-                      setSelectedNodes(prev => 
-                        prev.includes(node.id) 
-                          ? prev.filter(id => id !== node.id)
-                          : [...prev, node.id]
+                    if ((e.metaKey || e.ctrlKey) && selectedNodes.length === 1 && !selectedNodes.includes(node.id)) {
+                      // Cmd/Ctrl + click: connect from selected node to this node
+                      const from = selectedNodes[0];
+                      const to = node.id;
+                      const exists = connections.some(
+                        (conn) => (conn.from === from && conn.to === to) || (conn.from === to && conn.to === from)
                       );
+                      if (!exists) {
+                        setConnections(prevConnections => [
+                          ...prevConnections,
+                          { from, to }
+                        ]);
+                      }
+                      // After connecting, select only the second node
+                      setSelectedNodes([to]);
                     } else {
-                      handleClickNode(e, node.id);
+                      setSelectedNodes(prev => {
+                        if (prev.includes(node.id)) {
+                          // Unselect if already selected
+                          return prev.filter(id => id !== node.id);
+                        } else if (prev.length < 2) {
+                          // Add to selection if less than 2
+                          return [...prev, node.id];
+                        } else {
+                          // If already 2 selected, replace with just this node
+                          return [node.id];
+                        }
+                      });
                     }
                   }}
                   onDoubleClick={(e) => handleDoubleClick(e, node)}
@@ -1075,51 +1212,54 @@ export default function NodeCanvas() {
 
                   {editingNode?.id === node.id ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                      <input
-                        type="text"
-                        value={editingNode.newText}
-                        onChange={(e) => setEditingNode({
-                          ...editingNode,
-                          newText: e.target.value
-                        })}
-                        style={{
-                          width: '100%',
-                          fontSize: '0.7rem',
-                          padding: '0.25rem',
-                          border: '1px solid rgba(204, 204, 204, 0.5)',
-                          borderRadius: '4px'
-                        }}
-                        autoFocus
-                      />
-                      <input
-                        type="time"
-                        value={editingNode.newTime || ''}
-                        onChange={(e) => setEditingNode({
-                          ...editingNode,
-                          newTime: e.target.value
-                        })}
-                        style={{
-                          width: '100%',
-                          fontSize: '0.7rem',
-                          padding: '0.25rem',
-                          border: '1px solid rgba(204, 204, 204, 0.5)',
-                          borderRadius: '4px'
-                        }}
-                      />
-                      <button
-                        onClick={handleEditSave}
-                        style={{
-                          fontSize: '0.7rem',
-                          padding: '0.25rem',
-                          background: '#3b82f6',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '4px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        Save
-                      </button>
+                      {/* Prevent canvas click from closing edit when clicking inside the edit box */}
+                      <div onClick={e => e.stopPropagation()}>
+                        <input
+                          type="text"
+                          value={editingNode.newText}
+                          onChange={(e) => setEditingNode({
+                            ...editingNode,
+                            newText: e.target.value
+                          })}
+                          style={{
+                            width: '100%',
+                            fontSize: '0.7rem',
+                            padding: '0.25rem',
+                            border: '1px solid rgba(204, 204, 204, 0.5)',
+                            borderRadius: '4px'
+                          }}
+                          autoFocus
+                        />
+                        <input
+                          type="time"
+                          value={editingNode.newTime || ''}
+                          onChange={(e) => setEditingNode({
+                            ...editingNode,
+                            newTime: e.target.value
+                          })}
+                          style={{
+                            width: '100%',
+                            fontSize: '0.7rem',
+                            padding: '0.25rem',
+                            border: '1px solid rgba(204, 204, 204, 0.5)',
+                            borderRadius: '4px'
+                          }}
+                        />
+                        <button
+                          onClick={handleEditSave}
+                          style={{
+                            fontSize: '0.7rem',
+                            padding: '0.25rem',
+                            background: '#3b82f6',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Save
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <div style={{
